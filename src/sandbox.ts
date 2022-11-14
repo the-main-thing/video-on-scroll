@@ -1,4 +1,4 @@
-import { videoOnScroll } from './main'
+import { videoOnScroll } from '.'
 import './style.css'
 
 videoOnScroll({
