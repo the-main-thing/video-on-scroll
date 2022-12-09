@@ -1,91 +1,104 @@
+const ZERO_BLOCK_RECORD_TYPE = '396'
+
 export type OnRange = (data: {
 	start: number
 	end: number
 	current: number
-	getPosition: (start: number, end: number) => ReturnType<typeof inRange>
+	getPositionData: (
+		start: number,
+		end: number
+	) => {
+		inRange: boolean
+		position: number
+		linearGradient: number
+		easeOutExpo: number
+	}
 }) => void
+;(window as any).videoOnScroll = videoOnScroll
+;(window as any).getEventHandler = getEventHandler
 
-// videoOnScroll({
-// 	url: 'https://tilda.ws/video_test/drawing_4_1_3.mp4',
-// 	scrollSize: 2000,
-// 	eventsOnScroll: [
-// 		({ current, getPosition }) => {
-// 			console.log(current)
-// 			console.log(...getPosition(100, 200))
-// 		},
-// 	],
-// })
+const canvasGetter = canvasCreator()
 
 export default async function videoOnScroll({
 	url,
 	scrollSize,
-	eventsOnTime,
-	eventsOnScroll,
+	onScroll,
+	onTime,
 }: {
 	url: string | URL
 	scrollSize: number
-	eventsOnTime?: Array<OnRange>
-	eventsOnScroll?: Array<OnRange>
+	onScroll?: OnRange
+	onTime?: OnRange
 }) {
-	const heightSetter = createHeigthSetter(scrollSize)
-	const container = createContainer()
-	container.append(heightSetter)
 	const video = createVideo(url)
 
-	await waitForLoad(video)
+	const heightSetter = createHeigthSetter(scrollSize)
+	const container = document.createElement('div')
+	container.style.position = 'relative'
+	container.append(heightSetter)
 	mount(container, video)
 	window.scrollTo(0, 0)
+
+	await waitForLoad(video)
 
 	const heightSetterRect = heightSetter.getBoundingClientRect()
 	const pxToTime = getPxToTime(video.duration, heightSetterRect.height)
 	let lastPosition = window.scrollY
+
+	const getRangeHandler = (handler?: OnRange) => {
+		return handler
+			? (current: number) => {
+					handler({
+						start: 0,
+						end: scrollSize,
+						current,
+						getPositionData: (start: number, end: number) => {
+							return {
+								inRange: inRange(start, end, current),
+								position: traveledInRange(start, end, current),
+								linearGradient: linearGradient(
+									start,
+									end,
+									current
+								),
+								easeOutExpo: easeOutExpo(
+									linearGradient(start, end, current),
+									0,
+									1,
+									100
+								),
+							}
+						},
+					})
+			  }
+			: () => void 0
+	}
+
+	const handleScroll = getRangeHandler(onScroll)
+	const handleTime = getRangeHandler(onTime)
+
 	const scrollPlay = () => {
 		const scrolled = window.scrollY
 		if (lastPosition === scrolled) {
 			return window.requestAnimationFrame(scrollPlay)
 		}
 
-		const frameNumber = pxToTime(scrolled)
-		if (frameNumber >= video.duration) {
+		const time = pxToTime(scrolled)
+		if (time >= video.duration) {
 			onEnd(video, scrolled)
 			return window.requestAnimationFrame(scrollPlay)
 		}
 
-		if (frameNumber < 0) {
+		if (time < 0) {
 			return window.requestAnimationFrame(scrollPlay)
 		}
 
 		onStart(video)
 
-		video.currentTime = frameNumber
+		video.currentTime = time
 		if (lastPosition !== scrolled) {
-			if (eventsOnScroll?.length) {
-				const data = {
-					start: 0,
-					end: scrollSize,
-					current: scrolled,
-					getPosition: (start: number, end: number) =>
-						inRange(start, end, scrolled),
-				}
-				for (let i = 0; i < eventsOnScroll.length; i++) {
-					const onScrollHandler = eventsOnScroll[i]
-					onScrollHandler(data)
-				}
-			}
-
-			if (eventsOnTime?.length) {
-				const data = {
-					start: 0,
-					end: video.duration,
-					current: frameNumber,
-					getPosition: (start: number, end: number) =>
-						inRange(start, end, frameNumber),
-				}
-				for (let i = 0; i < eventsOnTime.length; i++) {
-					const onTimeHandler = eventsOnTime[i]
-					onTimeHandler(data)
-				}
-			}
+			handleScroll(scrolled)
+			handleTime(time)
 		}
 		lastPosition = scrolled
 		return window.requestAnimationFrame(scrollPlay)
@@ -96,32 +109,25 @@ export default async function videoOnScroll({
 
 function getPxToTime(duration: number, scrollLength: number) {
 	const playbackSpeed = duration / (scrollLength - window.innerHeight)
-	console.log({
-		scrollLength,
-		duration,
-		playbackSpeed,
-	})
 	return (scrolled: number) => {
-		console.log(scrolled, scrolled * playbackSpeed)
 		return scrolled * playbackSpeed
 	}
 }
 
-function inRange(
-	start: number,
-	end: number,
-	current: number
-): [inRange: boolean, traveledWithinRange: number] {
-	return [
-		current >= start && current <= end,
-		traveledInRange(start, end, current),
-	]
+function inRange(start: number, end: number, current: number): boolean {
+	return current >= start && current <= end
 }
 
 function traveledInRange(start: number, end: number, current: number): number {
 	const rangeSize = end - start
 	const currentPositionInRange = current - start
-	return (rangeSize / 100) * currentPositionInRange
+	return (currentPositionInRange / rangeSize) * 100
+}
+
+function linearGradient(start: number, end: number, current: number): number {
+	const vertex = (end - start) / 2 + start
+	const ascend = traveledInRange(start, vertex, current)
+	return ascend < 100 ? ascend : 200 - ascend
 }
 
 function waitForLoad(video: HTMLVideoElement): Promise<void> {
@@ -179,18 +185,16 @@ function setVideoStyles(video: HTMLVideoElement) {
 
 function mount(container: HTMLElement, video: HTMLVideoElement) {
 	const videoContainer = document.createElement('div')
-	videoContainer.style.display = 'none'
+	videoContainer.style.display = 'flex'
+	videoContainer.style.alignItems = 'bottom'
 	videoContainer.style.position = 'absolute'
-	videoContainer.style.top = '0'
-	videoContainer.style.left = '0'
+	videoContainer.style.width = '100%'
+	videoContainer.style.inset = '0'
 	videoContainer.style.overflow = 'hidden'
-	videoContainer.style.height = window.innerHeight + 'px'
-	videoContainer.style.width = window.innerWidth + 'px'
 	videoContainer.appendChild(video)
 	container.appendChild(videoContainer)
 	document.body.prepend(container)
 	setVideoStyles(video)
-	videoContainer.style.display = 'block'
 }
 
 function createVideo(url: string | URL): HTMLVideoElement {
@@ -216,20 +220,12 @@ function createHeigthSetter(scrollSize: number): HTMLDivElement {
 	return heightSetter
 }
 
-function createContainer(): HTMLDivElement {
-	const container = document.createElement('div')
-	container.style.position = 'relative'
-	return container
-}
-
 function onEnd(video: HTMLVideoElement, scrolled: number) {
+	getCanvas().unmount()
 	const parent = video.parentNode as HTMLDivElement
 	if (parent.style.position === 'fixed') {
 		parent.style.position = 'absolute'
 		parent.style.top = scrolled + 'px'
-		parent.style.backgroundColor = 'red'
-		parent.style.display = 'flex'
-		parent.style.alignItems = 'bottom'
 		if (video.style.position === 'fixed') {
 			video.style.position = 'absolute'
 		}
@@ -237,11 +233,153 @@ function onEnd(video: HTMLVideoElement, scrolled: number) {
 }
 
 function onStart(video: HTMLVideoElement) {
+	getCanvas().mount()
 	const parent = video.parentNode as HTMLDivElement
-	if (parent.style.position !== 'fixed') {
+	if (parent.style.position === 'absolute') {
 		parent.style.position = 'fixed'
 		parent.style.top = '0'
-		parent.style.float = 'none'
 		setVideoStyles(video)
 	}
 }
+
+function easeOutExpo(
+	time: number,
+	start: number,
+	change: number,
+	duration: number
+): number {
+	return time === duration
+		? start + change
+		: change * (-Math.pow(2, (-10 * time) / duration) + 1) + start
+}
+
+function canvasCreator() {
+	const container = document.createElement('div') as HTMLDivElement & {
+		mount: typeof mount
+		unmount: typeof unmount
+		addContent: typeof addContent
+	}
+
+	container.setAttribute('data-role', 'canvas')
+	container.style.position = 'fixed'
+	container.style.width = '100vw'
+	container.style.height = '100vh'
+	container.style.inset = '0'
+	document.body.appendChild(container)
+	function mount() {
+		container.style.display = 'block'
+		return unmount
+	}
+
+	function unmount() {
+		container.style.display = 'none'
+		return mount
+	}
+
+	const getContentBlock = () => {
+		const contentContainer = document.createElement(
+			'div'
+		) as HTMLDivElement & {}
+		contentContainer.style.position = 'absolute'
+		contentContainer.style.top = '0'
+		contentContainer.style.left = '0'
+		contentContainer.style.width = '100vw'
+		contentContainer.setAttribute('data-role', 'canvas-content')
+		return contentContainer
+	}
+
+	function addContent(element: HTMLElement) {
+		const contentBlock = getContentBlock()
+		container.appendChild(contentBlock)
+		contentBlock.appendChild(element)
+		if (element.dataset.recordType === ZERO_BLOCK_RECORD_TYPE) {
+			element.style.width = '100%'
+		}
+	}
+	container.mount = mount
+	container.unmount = unmount
+	container.addContent = addContent
+	return () => container
+}
+
+function getCanvas() {
+	return canvasGetter()
+}
+
+function createElementHandler({
+	id,
+	start,
+	end,
+}: {
+	id: string
+	start: number
+	end: number
+}) {
+	const element = document.querySelector(id) as HTMLElement | null
+	if (!element) {
+		console.error(`Could not find element with id: ${id}`)
+		return () => void 0
+	}
+	if (!element.parentNode) {
+		console.error(`Element with id: \`${id}\` has no parentNode`)
+		return () => void 0
+	}
+	element.parentNode.removeChild(element)
+	element.style.position = 'absolute'
+	element.style.opacity = '0'
+	const container = getCanvas()
+	container.addContent(element)
+
+	return ({
+		getPositionData,
+	}: {
+		getPositionData: (
+			start: number,
+			end: number
+		) => {
+			inRange: boolean
+			easeOutExpo: number
+		}
+	}) => {
+		const { inRange, easeOutExpo } = getPositionData(start, end)
+		if (inRange) {
+			element.style.opacity = `${easeOutExpo}`
+			return
+		}
+		element.style.opacity = '0'
+		return
+	}
+}
+
+function getEventHandler(config: {
+	[id: `#${string}`]: {
+		start: number
+		end: number
+	}
+}): OnRange {
+	const handlers = Object.entries(config).map(([id, { start, end }]) => {
+		return createElementHandler({
+			id,
+			start,
+			end,
+		})
+	})
+	const onRange: OnRange = data => {
+		for (let i = 0; i < handlers.length; i++) {
+			const handler = handlers[i]
+			handler(data)
+		}
+	}
+
+	return onRange
+}
+
+// videoOnScroll({
+// 	url: 'https://tilda.ws/video_test/drawing_4_1_3.mp4',
+// 	scrollSize: 4000,
+// 	onScroll: getEventHandler({
+// 		id: '#test',
+// 		start: 200,
+// 		end: 400,
+// 	}),
+// })
