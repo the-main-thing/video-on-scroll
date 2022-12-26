@@ -1,9 +1,18 @@
-import videoOnScroll from '.'
+import videoOnScroll, { getEventHandler } from '.'
 import './style.css'
 
-console.log(videoOnScroll.name ? '' : '')
+const images = Array(65)
+	.fill(0)
+	.map((_, index) => `/images/${String(index + 1).padStart(3, '0')}.jpg`)
 
-// videoOnScroll({
-// 	url: '/test.mp4',
-// 	scrollSize: 400,
-// })
+videoOnScroll({
+	images,
+	scrollSize: 3000,
+	onScroll: getEventHandler({
+		'#test': {
+			start: 300,
+			end: 800,
+			handleOpacity: false,
+		},
+	}),
+})

@@ -1,18 +1,16 @@
+import { createPlayer } from './player'
+
 const ZERO_BLOCK_RECORD_TYPE = '396'
 
 export type OnRange = (data: {
 	start: number
 	end: number
-	current: number
-	getPositionData: (
-		start: number,
-		end: number
-	) => {
-		inRange: boolean
-		position: number
-		linearGradient: number
-		easeOutExpo: number
-	}
+	frame: number
+	scroll: number
+	inRange: (start: number, end: number, value: number) => boolean
+	position: (start: number, end: number, value: number) => number
+	linearGradient: (start: number, end: number, value: number) => number
+	easeOutExpo: (start: number, end: number, value: number) => number
 }) => void
 ;(window as any).videoOnScroll = videoOnScroll
 ;(window as any).getEventHandler = getEventHandler
@@ -20,98 +18,47 @@ export type OnRange = (data: {
 const canvasGetter = canvasCreator()
 
 export default async function videoOnScroll({
-	url,
+	images,
 	scrollSize,
 	onScroll,
-	onTime,
 }: {
-	url: string | URL
+	images: Array<string>
 	scrollSize: number
-	onScroll?: OnRange
-	onTime?: OnRange
+	onScroll: OnRange
 }) {
-	const video = createVideo(url)
+	if (!images.length) {
+		throw new Error('No images provided.')
+	}
+	const totalFrames = images.length
+	const lastFrame = totalFrames - 1
+	const { start, canvas } = await createPlayer({
+		images,
+		scrollSize,
+		onFrameChange: ({ frame, scroll }) => {
+			onScroll({
+				start: 0,
+				end: lastFrame,
+				frame,
+				scroll,
+				inRange,
+				position: traveledInRange,
+				linearGradient,
+				easeOutExpo,
+			})
+			if (scroll >= scrollSize) {
+				return onEnd(canvas, scroll)
+			}
+			return onStart(canvas)
+		},
+	})
 
 	const heightSetter = createHeigthSetter(scrollSize)
 	const container = document.createElement('div')
 	container.style.position = 'relative'
 	container.append(heightSetter)
-	mount(container, video)
+	mount(container, canvas)
 	window.scrollTo(0, 0)
-
-	await waitForLoad(video)
-
-	const heightSetterRect = heightSetter.getBoundingClientRect()
-	const pxToTime = getPxToTime(video.duration, heightSetterRect.height)
-	let lastPosition = window.scrollY
-
-	const getRangeHandler = (handler?: OnRange) => {
-		return handler
-			? (current: number) => {
-					handler({
-						start: 0,
-						end: scrollSize,
-						current,
-						getPositionData: (start: number, end: number) => {
-							return {
-								inRange: inRange(start, end, current),
-								position: traveledInRange(start, end, current),
-								linearGradient: linearGradient(
-									start,
-									end,
-									current
-								),
-								easeOutExpo: easeOutExpo(
-									linearGradient(start, end, current),
-									0,
-									1,
-									100
-								),
-							}
-						},
-					})
-			  }
-			: () => void 0
-	}
-
-	const handleScroll = getRangeHandler(onScroll)
-	const handleTime = getRangeHandler(onTime)
-
-	const scrollPlay = () => {
-		const scrolled = window.scrollY
-		if (lastPosition === scrolled) {
-			return window.requestAnimationFrame(scrollPlay)
-		}
-
-		const time = pxToTime(scrolled)
-		if (time >= video.duration) {
-			onEnd(video, scrolled)
-			return window.requestAnimationFrame(scrollPlay)
-		}
-
-		if (time < 0) {
-			return window.requestAnimationFrame(scrollPlay)
-		}
-
-		onStart(video)
-
-		video.currentTime = time
-		if (lastPosition !== scrolled) {
-			handleScroll(scrolled)
-			handleTime(time)
-		}
-		lastPosition = scrolled
-		return window.requestAnimationFrame(scrollPlay)
-	}
-
-	window.requestAnimationFrame(scrollPlay)
-}
-
-function getPxToTime(duration: number, scrollLength: number) {
-	const playbackSpeed = duration / (scrollLength - window.innerHeight)
-	return (scrolled: number) => {
-		return scrolled * playbackSpeed
-	}
+	start()
 }
 
 function inRange(start: number, end: number, current: number): boolean {
@@ -130,88 +77,18 @@ function linearGradient(start: number, end: number, current: number): number {
 	return ascend < 100 ? ascend : 200 - ascend
 }
 
-function waitForLoad(video: HTMLVideoElement): Promise<void> {
-	let loadedCounter = 0
-	const addEventListener = (
-		eventName: keyof HTMLVideoElementEventMap,
-		resolve: () => void
-	) => {
-		loadedCounter += 1
-		const callback = () => {
-			loadedCounter -= 1
-			if (loadedCounter === 0) {
-				video.removeEventListener(eventName, callback)
-				return resolve()
-			}
-		}
-		video.addEventListener(eventName, callback)
-	}
-
-	return new Promise<void>(resolve => {
-		video.load()
-		if (video.readyState > 2) {
-			return resolve()
-		}
-		addEventListener('loadedmetadata', resolve)
-		addEventListener('loadeddata', resolve)
-	})
-}
-
-function getVideoWidth(video: HTMLVideoElement): `${number}px` {
-	const videoRatio = video.videoWidth / video.videoHeight
-	const screenRatio = window.innerWidth / window.innerHeight
-	const elementsRatio = videoRatio / screenRatio
-	const width =
-		elementsRatio >= 1 ? window.innerHeight * videoRatio : window.innerWidth
-	return `${Math.floor(width)}px`
-}
-
-function getVideoStyles(video: HTMLVideoElement) {
-	return {
-		display: 'block',
-		position: 'fixed',
-		top: '0',
-		left: '0',
-		width: getVideoWidth(video),
-	} as const
-}
-
-function setVideoStyles(video: HTMLVideoElement) {
-	const videoStyles = getVideoStyles(video)
-	for (const [key, value] of Object.entries(videoStyles)) {
-		video.style[key as keyof typeof videoStyles] = value
-	}
-}
-
-function mount(container: HTMLElement, video: HTMLVideoElement) {
+function mount(container: HTMLElement, canvas: HTMLCanvasElement) {
 	const videoContainer = document.createElement('div')
 	videoContainer.style.display = 'flex'
 	videoContainer.style.alignItems = 'bottom'
-	videoContainer.style.position = 'absolute'
-	videoContainer.style.width = '100%'
-	videoContainer.style.inset = '0'
+	videoContainer.style.position = 'fixed'
+	videoContainer.style.width = '100vw'
+	videoContainer.style.height = '100vh'
+	videoContainer.style.inset = '0px'
 	videoContainer.style.overflow = 'hidden'
-	videoContainer.appendChild(video)
+	videoContainer.appendChild(canvas)
 	container.appendChild(videoContainer)
 	document.body.prepend(container)
-	setVideoStyles(video)
-}
-
-function createVideo(url: string | URL): HTMLVideoElement {
-	const video = document.createElement('video')
-	const source = document.createElement('source')
-	source.src = new URL(url, window.location.href).toString()
-	video.src = source.src
-	video.appendChild(source)
-
-	// Set up video attributes
-	video.setAttribute('tabindex', '0')
-	video.setAttribute('autobuffer', '')
-	video.muted = true
-	video.controls = false
-	video.preload = 'auto'
-
-	return video
 }
 
 function createHeigthSetter(scrollSize: number): HTMLDivElement {
@@ -220,29 +97,32 @@ function createHeigthSetter(scrollSize: number): HTMLDivElement {
 	return heightSetter
 }
 
-function onEnd(video: HTMLVideoElement, scrolled: number) {
+function onEnd(video: HTMLCanvasElement, scrolled: number) {
 	getCanvas().unmount()
 	const parent = video.parentNode as HTMLDivElement
 	if (parent.style.position === 'fixed') {
 		parent.style.position = 'absolute'
 		parent.style.top = scrolled + 'px'
-		if (video.style.position === 'fixed') {
-			video.style.position = 'absolute'
-		}
+		parent.style.left = '0px'
 	}
 }
 
-function onStart(video: HTMLVideoElement) {
+function onStart(video: HTMLCanvasElement) {
 	getCanvas().mount()
 	const parent = video.parentNode as HTMLDivElement
 	if (parent.style.position === 'absolute') {
 		parent.style.position = 'fixed'
-		parent.style.top = '0'
-		setVideoStyles(video)
+		parent.style.top = 'none'
+		parent.style.inset = '0px'
+		parent.style.left = '0px'
 	}
 }
 
-function easeOutExpo(
+function easeOutExpo(start: number, end: number, value: number): number {
+	return calculateEaseOutExpo(linearGradient(start, end, value), 0, 1, 100)
+}
+
+function calculateEaseOutExpo(
 	time: number,
 	start: number,
 	change: number,
@@ -258,6 +138,7 @@ function canvasCreator() {
 		mount: typeof mount
 		unmount: typeof unmount
 		addContent: typeof addContent
+		removeContent: typeof removeContent
 	}
 
 	container.setAttribute('data-role', 'canvas')
@@ -296,9 +177,21 @@ function canvasCreator() {
 			element.style.width = '100%'
 		}
 	}
+
+	function removeContent(element: HTMLElement) {
+		const contentBlock = element.parentElement
+		if (!contentBlock) {
+			console.warn('Element marked to remove has no parentElement')
+			container.removeChild(element)
+			return
+		}
+		container.removeChild(contentBlock)
+	}
+
 	container.mount = mount
 	container.unmount = unmount
 	container.addContent = addContent
+	container.removeContent = removeContent
 	return () => container
 }
 
@@ -310,10 +203,12 @@ function createElementHandler({
 	id,
 	start,
 	end,
+	handleOpacity,
 }: {
 	id: string
 	start: number
 	end: number
+	handleOpacity: boolean
 }) {
 	const element = document.querySelector(id) as HTMLElement | null
 	if (!element) {
@@ -328,22 +223,15 @@ function createElementHandler({
 	element.style.position = 'absolute'
 	element.style.opacity = '0'
 	const container = getCanvas()
-	container.addContent(element)
-
-	return ({
-		getPositionData,
-	}: {
-		getPositionData: (
-			start: number,
-			end: number
-		) => {
-			inRange: boolean
-			easeOutExpo: number
-		}
-	}) => {
-		const { inRange, easeOutExpo } = getPositionData(start, end)
-		if (inRange) {
-			element.style.opacity = `${easeOutExpo}`
+	return ({ scroll }: { scroll: number }) => {
+		if (inRange(start, end, scroll)) {
+			container.addContent(element)
+			if (!handleOpacity) {
+				element.style.opacity = '1'
+				return
+			}
+			const opacity = easeOutExpo(start, end, scroll)
+			element.style.opacity = `${opacity}`
 			return
 		}
 		element.style.opacity = '0'
@@ -351,19 +239,24 @@ function createElementHandler({
 	}
 }
 
-function getEventHandler(config: {
+export function getEventHandler(config: {
 	[id: `#${string}`]: {
 		start: number
 		end: number
+		handleOpacity?: boolean
 	}
 }): OnRange {
-	const handlers = Object.entries(config).map(([id, { start, end }]) => {
-		return createElementHandler({
-			id,
-			start,
-			end,
-		})
-	})
+	const handlers = Object.entries(config).map(
+		([id, { start, end, handleOpacity }]) => {
+			return createElementHandler({
+				id,
+				start,
+				end,
+				handleOpacity:
+					typeof handleOpacity === 'boolean' ? handleOpacity : true,
+			})
+		}
+	)
 	const onRange: OnRange = data => {
 		for (let i = 0; i < handlers.length; i++) {
 			const handler = handlers[i]
@@ -373,13 +266,3 @@ function getEventHandler(config: {
 
 	return onRange
 }
-
-// videoOnScroll({
-// 	url: 'https://tilda.ws/video_test/drawing_4_1_3.mp4',
-// 	scrollSize: 4000,
-// 	onScroll: getEventHandler({
-// 		id: '#test',
-// 		start: 200,
-// 		end: 400,
-// 	}),
-// })
