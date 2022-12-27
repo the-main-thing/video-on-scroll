@@ -93,6 +93,7 @@ function mount(container: HTMLElement, canvas: HTMLCanvasElement) {
 
 function createHeigthSetter(scrollSize: number): HTMLDivElement {
 	const heightSetter = document.createElement('div')
+	heightSetter.style.position = 'absolute'
 	heightSetter.style.height = window.innerHeight * 2 + scrollSize + 'px'
 	return heightSetter
 }

@@ -37,5 +37,11 @@ export const fillRect = (
 		}
 	}
 
-	throw new Error('Unexpected condition')
+	throw new Error(
+		`Unexpected condition. ${JSON.stringify(
+			{ container, child, containerRatio, childRatio },
+			null,
+			2
+		)}`
+	)
 }
