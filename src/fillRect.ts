@@ -4,6 +4,9 @@ export const fillRect = (
 ): { x: number; y: number } => {
 	const containerRatio = container.x / container.y
 	const childRatio = child.x / child.y
+	if (!childRatio || !containerRatio) {
+		return container
+	}
 
 	// horizontal
 	if (containerRatio >= 1 && childRatio >= 1) {

@@ -7,58 +7,160 @@ export type OnRange = (data: {
 	end: number
 	frame: number
 	scroll: number
+	appendChild: (element: Element) => void
+	removeChild: (element: Element) => void
 	inRange: (start: number, end: number, value: number) => boolean
 	position: (start: number, end: number, value: number) => number
 	linearGradient: (start: number, end: number, value: number) => number
 	easeOutExpo: (start: number, end: number, value: number) => number
 }) => void
-;(window as any).videoOnScroll = videoOnScroll
-;(window as any).getEventHandler = getEventHandler
 
-const canvasGetter = canvasCreator()
+export const playVideos = async (
+	...configs: Array<{
+		parent: `#${string}`
+		scrollSize: number
+		images: Array<string>
+		content: Array<{
+			id: `#${string}`
+			start: number
+			end: number
+			handleOpacity?: boolean
+		}>
+	}>
+) => {
+	for (const { images, scrollSize, parent, content } of configs) {
+		await videoOnScroll({
+			images,
+			scrollSize,
+			parent,
+			onScroll: getEventHandler(content),
+		})
+	}
+}
+;(window as any).playVideos = playVideos
 
-export default async function videoOnScroll({
+const getContainer = (scrollHeight: number) => {
+	const wrapper = document.createElement('div')
+	const setWrapperSize = () => {
+		wrapper.style.height = `${window.innerHeight + scrollHeight}px`
+	}
+	setWrapperSize()
+	wrapper.style.position = 'relative'
+	const container = document.createElement('div')
+	container.style.position = 'absolute'
+	container.style.top = '0px'
+	container.style.left = '0px'
+	container.style.width = '100vw'
+	container.style.height = '100vh'
+	wrapper.appendChild(container)
+
+	const mount = (parent: Element) => {
+		parent.appendChild(wrapper)
+		window.addEventListener('resize', setWrapperSize)
+	}
+	const unmount = () => {
+		wrapper.parentElement?.removeChild(wrapper)
+		window.removeEventListener('resize', setWrapperSize)
+	}
+	const onEnterView = () => {
+		container.style.position = 'fixed'
+		container.style.bottom = ''
+		container.style.top = '0px'
+		container.style.left = '0px'
+	}
+	const onExitView = (side: 'top' | 'bottom') => {
+		container.style.position = 'absolute'
+		container.style.inset = ''
+		container.style.top = ''
+		container.style.bottom = ''
+		container.style[side] = '0px'
+		container.style.left = '0px'
+	}
+
+	const appendChild = (element: Element) => {
+		container.appendChild(element)
+		return () => container.removeChild(element)
+	}
+
+	const removeChild = (element: Element) => {
+		try {
+			container.removeChild(element)
+		} catch {
+			// do nothing
+		}
+	}
+
+	return {
+		mount,
+		unmount,
+		onEnterView,
+		onExitView,
+		appendChild,
+		removeChild,
+	}
+}
+
+const videoOnScroll = async ({
 	images,
 	scrollSize,
 	onScroll,
+	parent: parentId,
 }: {
 	images: Array<string>
 	scrollSize: number
 	onScroll: OnRange
-}) {
+	parent: `#${string}`
+}) => {
 	if (!images.length) {
 		throw new Error('No images provided.')
 	}
-	const totalFrames = images.length
-	const lastFrame = totalFrames - 1
+	const parent = document.querySelector(parentId)
+	if (!parent) {
+		throw new Error(`No parent element found with id: ${parentId}`)
+	}
+
+	const parentRect = parent.getBoundingClientRect()
+	const startOffset = Math.floor(Math.abs(parentRect.top))
+
+	const container = getContainer(scrollSize)
+	container.mount(parent)
+	const { appendChild, removeChild } = container
 	const { start, canvas } = await createPlayer({
 		images,
+		startOffset,
 		scrollSize,
-		onFrameChange: ({ frame, scroll }) => {
-			onScroll({
-				start: 0,
-				end: lastFrame,
-				frame,
-				scroll,
-				inRange,
-				position: traveledInRange,
-				linearGradient,
-				easeOutExpo,
-			})
-			if (scroll >= scrollSize) {
-				return onEnd(canvas, scroll)
+		onFrameChange: ({ frame, scroll, scrollSize }) => {
+			const roundedScroll = Math.round(scroll)
+			if (inRange(0, scrollSize, roundedScroll)) {
+				container.onEnterView()
+				onScroll({
+					start: 0,
+					end: scrollSize,
+					frame,
+					scroll,
+					inRange,
+					appendChild,
+					removeChild,
+					position: traveledInRange,
+					linearGradient,
+					easeOutExpo,
+				})
+				return
 			}
-			return onStart(canvas)
+			if (roundedScroll > scrollSize) {
+				return container.onExitView('bottom')
+			}
+			return container.onExitView('top')
 		},
 	})
 
-	const heightSetter = createHeigthSetter(scrollSize)
-	const container = document.createElement('div')
-	container.style.position = 'relative'
-	container.append(heightSetter)
-	mount(container, canvas)
-	window.scrollTo(0, 0)
-	start()
+	container.appendChild(canvas)
+
+	const play = () => {
+		start()
+		window.requestAnimationFrame(play)
+	}
+	play()
 }
 
 function inRange(start: number, end: number, current: number): boolean {
@@ -77,48 +179,6 @@ function linearGradient(start: number, end: number, current: number): number {
 	return ascend < 100 ? ascend : 200 - ascend
 }
 
-function mount(container: HTMLElement, canvas: HTMLCanvasElement) {
-	const videoContainer = document.createElement('div')
-	videoContainer.style.display = 'flex'
-	videoContainer.style.alignItems = 'bottom'
-	videoContainer.style.position = 'fixed'
-	videoContainer.style.width = '100vw'
-	videoContainer.style.height = '100vh'
-	videoContainer.style.inset = '0px'
-	videoContainer.style.overflow = 'hidden'
-	videoContainer.appendChild(canvas)
-	container.appendChild(videoContainer)
-	document.body.prepend(container)
-}
-
-function createHeigthSetter(scrollSize: number): HTMLDivElement {
-	const heightSetter = document.createElement('div')
-	heightSetter.style.position = 'absolute'
-	heightSetter.style.height = window.innerHeight * 2 + scrollSize + 'px'
-	return heightSetter
-}
-
-function onEnd(video: HTMLCanvasElement, scrolled: number) {
-	getCanvas().unmount()
-	const parent = video.parentNode as HTMLDivElement
-	if (parent.style.position === 'fixed') {
-		parent.style.position = 'absolute'
-		parent.style.top = scrolled + 'px'
-		parent.style.left = '0px'
-	}
-}
-
-function onStart(video: HTMLCanvasElement) {
-	getCanvas().mount()
-	const parent = video.parentNode as HTMLDivElement
-	if (parent.style.position === 'absolute') {
-		parent.style.position = 'fixed'
-		parent.style.top = 'none'
-		parent.style.inset = '0px'
-		parent.style.left = '0px'
-	}
-}
-
 function easeOutExpo(start: number, end: number, value: number): number {
 	return calculateEaseOutExpo(linearGradient(start, end, value), 0, 1, 100)
 }
@@ -134,71 +194,10 @@ function calculateEaseOutExpo(
 		: change * (-Math.pow(2, (-10 * time) / duration) + 1) + start
 }
 
-function canvasCreator() {
-	const container = document.createElement('div') as HTMLDivElement & {
-		mount: typeof mount
-		unmount: typeof unmount
-		addContent: typeof addContent
-		removeContent: typeof removeContent
-	}
-
-	container.setAttribute('data-role', 'canvas')
-	container.style.position = 'fixed'
-	container.style.width = '100vw'
-	container.style.height = '100vh'
-	container.style.inset = '0'
-	document.body.appendChild(container)
-	function mount() {
-		container.style.display = 'block'
-		return unmount
-	}
-
-	function unmount() {
-		container.style.display = 'none'
-		return mount
-	}
-
-	const getContentBlock = () => {
-		const contentContainer = document.createElement(
-			'div'
-		) as HTMLDivElement & {}
-		contentContainer.style.position = 'absolute'
-		contentContainer.style.top = '0'
-		contentContainer.style.left = '0'
-		contentContainer.style.width = '100vw'
-		contentContainer.setAttribute('data-role', 'canvas-content')
-		return contentContainer
-	}
-
-	function addContent(element: HTMLElement) {
-		const contentBlock = getContentBlock()
-		container.appendChild(contentBlock)
-		contentBlock.appendChild(element)
-		if (element.dataset.recordType === ZERO_BLOCK_RECORD_TYPE) {
-			element.style.width = '100%'
-		}
-	}
-
-	function removeContent(element: HTMLElement) {
-		const contentBlock = element.parentElement
-		if (!contentBlock) {
-			console.warn('Element marked to remove has no parentElement')
-			container.removeChild(element)
-			return
-		}
-		container.removeChild(contentBlock)
-	}
-
-	container.mount = mount
-	container.unmount = unmount
-	container.addContent = addContent
-	container.removeContent = removeContent
-	return () => container
-}
-
-function getCanvas() {
-	return canvasGetter()
-}
+const ELEMENTS_CONTAINERS_STORE = {} as Record<
+	string,
+	[HTMLDivElement, HTMLElement]
+>
 
 function createElementHandler({
 	id,
@@ -210,54 +209,80 @@ function createElementHandler({
 	start: number
 	end: number
 	handleOpacity: boolean
-}) {
-	const element = document.querySelector(id) as HTMLElement | null
-	if (!element) {
+}): OnRange {
+	const elementToShow = document.querySelector(id) as HTMLElement | null
+	if (elementToShow) {
+		elementToShow.parentElement?.removeChild(elementToShow)
+		const elementContainer = document.createElement('div')
+		elementContainer.style.position = 'absolute'
+		elementContainer.style.width = '100vw'
+		elementContainer.style.height = '100vh'
+		elementContainer.style.inset = '0'
+		elementContainer.style.opacity = '0'
+		elementContainer.appendChild(elementToShow)
+		ELEMENTS_CONTAINERS_STORE[id] = [elementContainer, elementToShow]
+	}
+	const elementsTuple = ELEMENTS_CONTAINERS_STORE[id]
+	if (!elementsTuple) {
 		console.error(`Could not find element with id: ${id}`)
 		return () => void 0
 	}
-	if (!element.parentNode) {
-		console.error(`Element with id: \`${id}\` has no parentNode`)
-		return () => void 0
+
+	const [elementContainer, element] = elementsTuple
+	let elementIsOnPage = false
+	const addToPage = (parent: { appendChild: (element: Element) => void }) => {
+		if (!elementIsOnPage) {
+			parent.appendChild(elementContainer)
+			elementIsOnPage = true
+		}
 	}
-	element.parentNode.removeChild(element)
-	element.style.position = 'absolute'
-	element.style.opacity = '0'
-	const container = getCanvas()
-	return ({ scroll }: { scroll: number }) => {
+
+	const removeFromPage = (parent: {
+		removeChild: (element: Element) => void
+	}) => {
+		parent.removeChild(elementContainer)
+		elementIsOnPage = false
+	}
+
+	return ({ scroll, appendChild, removeChild }) => {
 		if (inRange(start, end, scroll)) {
-			container.addContent(element)
+			addToPage({ appendChild })
 			if (!handleOpacity) {
-				element.style.opacity = '1'
+				elementContainer.style.opacity = '1'
+				if (element.dataset.recordType === ZERO_BLOCK_RECORD_TYPE) {
+					element.style.width = '100%'
+				}
 				return
 			}
 			const opacity = easeOutExpo(start, end, scroll)
-			element.style.opacity = `${opacity}`
+			elementContainer.style.opacity = `${opacity}`
 			return
 		}
-		element.style.opacity = '0'
+		if (elementIsOnPage) {
+			elementContainer.style.opacity = '0'
+			removeFromPage({ removeChild })
+		}
 		return
 	}
 }
 
-export function getEventHandler(config: {
-	[id: `#${string}`]: {
+export function getEventHandler(
+	config: Array<{
+		id: `#${string}`
 		start: number
 		end: number
 		handleOpacity?: boolean
-	}
-}): OnRange {
-	const handlers = Object.entries(config).map(
-		([id, { start, end, handleOpacity }]) => {
-			return createElementHandler({
-				id,
-				start,
-				end,
-				handleOpacity:
-					typeof handleOpacity === 'boolean' ? handleOpacity : true,
-			})
-		}
-	)
+	}>
+): OnRange {
+	const handlers = config.map(({ id, start, end, handleOpacity }) => {
+		return createElementHandler({
+			id,
+			start,
+			end,
+			handleOpacity:
+				typeof handleOpacity === 'boolean' ? handleOpacity : true,
+		})
+	})
 	const onRange: OnRange = data => {
 		for (let i = 0; i < handlers.length; i++) {
 			const handler = handlers[i]

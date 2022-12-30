@@ -40,8 +40,12 @@ const getSubscriptions = () => {
 						typeof update === 'function'
 							? (update as any)(sub[valueKey])
 							: update
-					sub[valueKey] = newValue
-					onChange(sub[valueKey])
+					const prevValue = sub[valueKey]
+					if (prevValue !== newValue) {
+						sub[valueKey] = newValue
+						onChange(newValue)
+						return
+					}
 					return
 				}
 				console.error('Trying to set value after unsubscribing from it')

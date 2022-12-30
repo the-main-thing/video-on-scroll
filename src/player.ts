@@ -2,6 +2,10 @@ import { subscribe } from './subscription'
 import { fillRect } from './fillRect'
 import { centerRect } from './centerRect'
 
+const getScrollPosition = (offset: number, scrolled: number) => {
+	return Math.abs(scrolled) - offset
+}
+
 const playerHandlers = async ({
 	urls,
 	onLoadProgress,
@@ -106,10 +110,12 @@ const getFrameFromScroll = ({
 
 export const createPlayer = async ({
 	images,
+	startOffset,
 	scrollSize,
 	onFrameChange,
 }: {
 	images: Array<string>
+	startOffset: number
 	scrollSize: number
 	onFrameChange: (info: {
 		frame: number
@@ -174,35 +180,28 @@ export const createPlayer = async ({
 		})
 	})
 
-	const startingScrollPosition = window.scrollY
-	let prevScrollValue = startingScrollPosition
-	const { setValue: setScroll } = subscribe(
-		startingScrollPosition,
-		scroll => {
-			if (prevScrollValue === scroll) {
-				return
-			}
-			const frameIndex = getFrameFromScroll({
-				scroll,
-				scrollSize,
-				totalFrames,
-			})
-			setFrame(frameIndex)
-			const imageRect = imagesRects[frameIndex]
-			setInfo({
-				scroll,
-				frame: frameIndex,
-				totalFrames,
-				scrollSize,
-				inViewPort: scrollSize - scroll + imageRect.y > 0,
-			})
-		}
-	)
+	const { setValue: setScroll } = subscribe(0, scroll => {
+		const frameIndex = getFrameFromScroll({
+			scroll,
+			scrollSize,
+			totalFrames,
+		})
+		setFrame(frameIndex)
+		const imageRect = imagesRects[frameIndex]
+		setInfo({
+			scroll,
+			frame: frameIndex,
+			totalFrames,
+			scrollSize,
+			inViewPort: scrollSize - scroll + imageRect.y > 0,
+		})
+	})
 
 	let listening = true
 	const onScroll = () => {
 		if (listening) {
-			setScroll(Math.abs(startingScrollPosition - window.scrollY))
+			const scrolled = getScrollPosition(startOffset, window.scrollY)
+			setScroll(scrolled)
 			window.requestAnimationFrame(onScroll)
 		}
 	}

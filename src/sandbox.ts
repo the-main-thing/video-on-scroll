@@ -1,7 +1,7 @@
-import videoOnScroll, { getEventHandler } from '.'
+import { playVideos } from '.'
 import './style.css'
 
-const images = `https://i.postimg.cc/VsT8CZDV/001.jpg
+let images = `https://i.postimg.cc/VsT8CZDV/001.jpg
 https://i.postimg.cc/YqWwfNPq/002.jpg
 https://i.postimg.cc/VkPP7ry9/003.jpg
 https://i.postimg.cc/6pVJFWwk/004.jpg
@@ -66,20 +66,51 @@ https://i.postimg.cc/4xYwhw2B/062.jpg
 https://i.postimg.cc/nhN2K76Z/063.jpg
 https://i.postimg.cc/KYLN0j2T/064.jpg
 https://i.postimg.cc/bJhRWPyB/065.jpg
-`.split('\n').filter(Boolean)
+`
+	.split('\n')
+	.filter(Boolean)
 
-// const images = Array(65)
-// 	.fill(0)
-// 	.map((_, index) => `/images/${String(index + 1).padStart(3, '0')}.jpg`)
+images = Array(65)
+	.fill(0)
+	.map((_, index) => `/images/${String(index + 1).padStart(3, '0')}.jpg`)
 
-videoOnScroll({
-	images,
-	scrollSize: 2000,
-	onScroll: getEventHandler({
-		'#test': {
-			start: 600,
-			end: 1000,
-			handleOpacity: false,
-		},
-	}),
-})
+playVideos(
+	{
+		parent: '#parent1',
+		images,
+		scrollSize: 2000,
+		content: [
+			{
+				id: '#test',
+				start: 600,
+				end: 1000,
+				handleOpacity: true,
+			},
+			{
+				id: '#test',
+				start: 1100,
+				end: 2000,
+				handleOpacity: false,
+			},
+		],
+	},
+	{
+		parent: '#parent2',
+		images,
+		scrollSize: 2000,
+		content: [
+			{
+				id: '#test',
+				start: 300,
+				end: 800,
+				handleOpacity: false,
+			},
+			{
+				id: '#test',
+				start: 1100,
+				end: 2000,
+				handleOpacity: true,
+			},
+		],
+	}
+)
