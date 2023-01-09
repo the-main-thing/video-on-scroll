@@ -129,6 +129,9 @@ const videoOnScroll = async ({
 		images,
 		startOffset,
 		scrollSize,
+		onLoadProgress: progress => {
+			console.log('loaded', progress)
+		},
 		onFrameChange: ({ frame, scroll, scrollSize }) => {
 			const roundedScroll = Math.round(scroll)
 			if (inRange(0, scrollSize, roundedScroll)) {

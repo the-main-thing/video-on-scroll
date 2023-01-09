@@ -2,6 +2,51 @@ import { subscribe } from './subscription'
 import { fillRect } from './fillRect'
 import { centerRect } from './centerRect'
 
+type OnProgress = (info: {
+	loaded: number
+	total: number
+	percent: number
+}) => void
+const makeProgressHandler = () => {
+	const onProgress = new Set<OnProgress>()
+	const { value, setValue, unsubscribe } = subscribe(
+		[0, 0] as [loaded: number, total: number],
+		([loaded, total]) => {
+			const percent = Math.round((loaded / total) * 100) || 0
+			const info = { loaded, total, percent }
+			for (const handler of onProgress.values()) {
+				handler(info)
+			}
+		}
+	)
+
+	return {
+		addToTotal: (toAdd: number) => {
+			setValue(([loaded, total]) => [loaded, total + toAdd])
+		},
+		addToProgress: (toAdd: number) => {
+			setValue(([loaded, total]) => [loaded + toAdd, total])
+		},
+		addListener: (listener: OnProgress) => {
+			onProgress.add(listener)
+			return () => onProgress.delete(listener)
+		},
+		removeListener: (listener: OnProgress) => {
+			return onProgress.delete(listener)
+		},
+		onProgress: () => {
+			setValue(([loaded, total]) => [loaded + 1, total])
+		},
+		currentValue: value,
+		finish: () => {
+			onProgress.clear()
+			unsubscribe()
+		},
+	}
+}
+
+const progress = makeProgressHandler()
+
 const getScrollPosition = (offset: number, scrolled: number) => {
 	return Math.abs(scrolled) - offset
 }
@@ -15,25 +60,17 @@ const playerHandlers = async ({
 	onLoadProgress: (percentLoaded: number) => void
 	onFrameChange: (frame: number) => void
 }) => {
-	const { setValue: setLoaded, unsubscribe: unsubscribeFromLoaded } =
-		subscribe(0, updatedLoaded => {
-			// Update counter
-			const percent = Math.floor((updatedLoaded / urls.length) * 100)
-			onLoadProgress(percent)
-			if (updatedLoaded === urls.length) {
-				// Display page
-				unsubscribeFromLoaded()
-				document
-					.querySelectorAll('[data-preloaded]')
-					.forEach(element => {
-						element.parentNode?.removeChild(element)
-					})
-			}
-		})
+	progress.addListener(({ percent }) => {
+		onLoadProgress(percent)
+	})
+	progress.addToTotal(urls.length)
 
 	const imagesRects = [] as Array<{ x: number; y: number }>
 	await new Promise<void>(resolve => {
-		for (const src of urls) {
+		const totalImagesCount = urls.length
+		let loaded = 0
+		for (let i = 0; i < totalImagesCount; i++) {
+			const src = urls[i]
 			const preloadImage = document.createElement('img')
 			preloadImage.style.position = 'absolute'
 			preloadImage.style.opacity = '0'
@@ -52,13 +89,11 @@ const playerHandlers = async ({
 			const onLoad = () => {
 				imageRect.x = img.width
 				imageRect.y = img.height
-				setLoaded(current => {
-					const next = current + 1
-					if (next === urls.length - 1) {
-						resolve()
-					}
-					return next
-				})
+				progress.onProgress()
+				loaded += 1
+				if (loaded === totalImagesCount) {
+					resolve()
+				}
 				img.removeEventListener('load', onLoad)
 			}
 			img.addEventListener('load', onLoad)
@@ -113,10 +148,12 @@ export const createPlayer = async ({
 	startOffset,
 	scrollSize,
 	onFrameChange,
+	onLoadProgress,
 }: {
 	images: Array<string>
 	startOffset: number
 	scrollSize: number
+	onLoadProgress: (progress: number) => void
 	onFrameChange: (info: {
 		frame: number
 		scroll: number
@@ -158,9 +195,7 @@ export const createPlayer = async ({
 
 	const { setFrame, imagesRects, currentFrame } = await playerHandlers({
 		urls: images,
-		onLoadProgress: _percent => {
-			/* @TODO: add progressbar */
-		},
+		onLoadProgress,
 		onFrameChange: drawImage,
 	})
 
